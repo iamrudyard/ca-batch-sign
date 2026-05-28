@@ -1,9 +1,11 @@
+import json
+import os
+import tempfile
 import threading
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-import tempfile
-import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -49,6 +51,50 @@ else:
 
 def clean_thumbprint_for_display(value):
     return "".join(ch for ch in str(value) if ch.lower() in "0123456789abcdef").upper()
+
+
+def get_settings_file_path():
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        base_dir = Path(appdata)
+    else:
+        base_dir = Path.home() / ".config"
+
+    return base_dir / "ca-batch-sign" / "settings.json"
+
+
+def load_gui_settings():
+    path = get_settings_file_path()
+
+    if not path.exists():
+        return {}, None
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {}, exc
+
+    if not isinstance(data, dict):
+        return {}, RuntimeError(f"Settings file is not a JSON object: {path}")
+
+    return data, None
+
+
+def save_gui_settings(data):
+    path = get_settings_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def delete_gui_settings():
+    path = get_settings_file_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def get_computer_timestamp_text():
@@ -115,6 +161,11 @@ def parse_cert_subject(subject):
         result[key.strip().upper()] = value.strip()
 
     return result
+
+
+def get_signer_name_from_cert_subject(subject):
+    fields = parse_cert_subject(subject)
+    return fields.get("CN", "").strip()
 
 
 def count_pdf_pages(pdf_path):
@@ -1719,20 +1770,30 @@ class PdfSignerGUI(tk.Tk):
         self.signature_image = tk.StringVar()
         self.logo_image = tk.StringVar()
         self.sample_certificate = tk.StringVar()
+        self.remember_selections = tk.BooleanVar(value=False)
 
         self.thumbprint = tk.StringVar()
         self.store_location = tk.StringVar(value="CurrentUser")
         self.selected_cert_subject = tk.StringVar(value="No certificate selected")
 
-        self.signer_name = tk.StringVar(value="Gomez Rudyard Ramos")
+        self.signer_name = tk.StringVar()
         self.page_number = tk.StringVar(value="1")
         self.signature_box = tk.StringVar(value="220,90,400,145")
         self.field_prefix = tk.StringVar(value="Signature")
+
+        saved_settings, self._settings_load_error = load_gui_settings()
+        self._remembered_settings_loaded = self._apply_saved_settings(saved_settings)
 
         self.timestamp_preview = tk.StringVar()
         self.update_timestamp_preview()
 
         self._build_ui()
+
+        if self._settings_load_error is not None:
+            self.log(f"Could not load saved selections: {self._settings_load_error}\n")
+
+        if self._remembered_settings_loaded:
+            self.log("Loaded remembered certificate, signature image and logo selections.\n")
 
         if IMPORT_ERROR is not None:
             self.log(
@@ -1740,6 +1801,33 @@ class PdfSignerGUI(tk.Tk):
                 "Make sure sigpdf_gui_final.py is saved in the same folder as sigpdf.py.\n\n"
                 f"Import error: {IMPORT_ERROR}\n"
             )
+
+    def _apply_saved_settings(self, data):
+        if not data.get("remember_selections"):
+            return False
+
+        self.remember_selections.set(True)
+        self.signature_image.set(str(data.get("signature_image") or ""))
+        self.logo_image.set(str(data.get("logo_image") or ""))
+        self.sample_certificate.set(str(data.get("sample_certificate") or ""))
+
+        thumbprint = clean_thumbprint_for_display(data.get("thumbprint") or "")
+        self.thumbprint.set(thumbprint)
+
+        store_location = str(data.get("store_location") or "CurrentUser")
+        if store_location not in ("CurrentUser", "LocalMachine"):
+            store_location = "CurrentUser"
+        self.store_location.set(store_location)
+
+        subject = str(data.get("selected_cert_subject") or "").strip()
+        if subject:
+            self.selected_cert_subject.set(subject)
+            self.signer_name.set(get_signer_name_from_cert_subject(subject))
+        elif thumbprint:
+            self.selected_cert_subject.set("Remembered certificate loaded")
+            self.signer_name.set("")
+
+        return True
 
     def _apply_theme(self):
         """Configure a clean, modern ttk theme with consistent typography and colors."""
@@ -1873,6 +1961,19 @@ class PdfSignerGUI(tk.Tk):
             fieldbackground=[("readonly", COLOR_SURFACE)],
             foreground=[("readonly", COLOR_TEXT)],
             bordercolor=[("focus", COLOR_ACCENT)],
+        )
+
+        # --- Checkbuttons -----------------------------------------------------
+        style.configure(
+            "TCheckbutton",
+            background=COLOR_SURFACE,
+            foreground=COLOR_TEXT,
+            font=label_font,
+        )
+        style.map(
+            "TCheckbutton",
+            background=[("active", COLOR_SURFACE)],
+            foreground=[("disabled", COLOR_TEXT_MUTED)],
         )
 
         # --- Buttons ----------------------------------------------------------
@@ -2090,6 +2191,13 @@ class PdfSignerGUI(tk.Tk):
             file_button=True,
         )
 
+        ttk.Checkbutton(
+            files_frame,
+            text="Remember selected certificate, signature image and logo",
+            variable=self.remember_selections,
+            command=self.on_remember_selections_changed,
+        ).grid(row=5, column=1, columnspan=2, sticky="w", pady=(6, 0), padx=(8, 0))
+
         # ---- Certificate card ----------------------------------------------
         cert_frame = ttk.LabelFrame(
             left_panel, text="  Certificate  ", padding=10, style="Card.TLabelframe"
@@ -2109,6 +2217,10 @@ class PdfSignerGUI(tk.Tk):
             foreground=COLOR_TEXT,
         )
         store_combo.grid(row=0, column=1, sticky="w", pady=5, padx=(8, 0))
+        store_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self.update_remembered_selections(),
+        )
 
         ttk.Button(
             cert_frame,
@@ -2153,6 +2265,7 @@ class PdfSignerGUI(tk.Tk):
         ttk.Entry(
             sig_frame,
             textvariable=self.signer_name,
+            state="readonly",
             foreground=COLOR_TEXT,             # signer name text is BLACK
             font=(FONT_FAMILY, 10),
         ).grid(row=0, column=1, columnspan=2, sticky="ew", pady=5, padx=(8, 0))
@@ -2289,6 +2402,52 @@ class PdfSignerGUI(tk.Tk):
             command=command,
         ).grid(row=row, column=2, sticky="ew", pady=6)
 
+    def _remembered_selection_payload(self):
+        return {
+            "remember_selections": True,
+            "signature_image": self.signature_image.get().strip(),
+            "logo_image": self.logo_image.get().strip(),
+            "sample_certificate": self.sample_certificate.get().strip(),
+            "thumbprint": clean_thumbprint_for_display(self.thumbprint.get()),
+            "store_location": self.store_location.get().strip() or "CurrentUser",
+            "selected_cert_subject": self.selected_cert_subject.get().strip(),
+        }
+
+    def save_remembered_selections(self):
+        if not self.remember_selections.get():
+            return
+
+        save_gui_settings(self._remembered_selection_payload())
+
+    def on_remember_selections_changed(self):
+        if self.remember_selections.get():
+            try:
+                self.save_remembered_selections()
+            except Exception as exc:
+                self.remember_selections.set(False)
+                messagebox.showerror("Remember selections failed", str(exc))
+                return
+
+            self.log("Remembering selected certificate, signature image and logo.\n")
+            return
+
+        try:
+            delete_gui_settings()
+        except Exception as exc:
+            messagebox.showerror("Clear saved selections failed", str(exc))
+            return
+
+        self.log("Cleared remembered certificate, signature image and logo selections.\n")
+
+    def update_remembered_selections(self):
+        if not self.remember_selections.get():
+            return
+
+        try:
+            self.save_remembered_selections()
+        except Exception as exc:
+            self.log(f"Could not save remembered selections: {exc}\n")
+
     def choose_input_folder(self):
         folder = filedialog.askdirectory(title="Select input folder containing PDF files")
         if folder:
@@ -2309,6 +2468,7 @@ class PdfSignerGUI(tk.Tk):
         )
         if file_path:
             self.signature_image.set(file_path)
+            self.update_remembered_selections()
 
     def choose_logo_image(self):
         file_path = filedialog.askopenfilename(
@@ -2320,6 +2480,7 @@ class PdfSignerGUI(tk.Tk):
         )
         if file_path:
             self.logo_image.set(file_path)
+            self.update_remembered_selections()
 
     def choose_sample_certificate(self):
         file_path = filedialog.askopenfilename(
@@ -2331,6 +2492,7 @@ class PdfSignerGUI(tk.Tk):
         )
         if file_path:
             self.sample_certificate.set(file_path)
+            self.update_remembered_selections()
 
     def open_box_mapper(self):
         pdf_path = self.sample_certificate.get().strip()
@@ -2380,6 +2542,9 @@ class PdfSignerGUI(tk.Tk):
 
             self.thumbprint.set(thumbprint)
             self.selected_cert_subject.set(subject)
+            self.signer_name.set(get_signer_name_from_cert_subject(subject))
+            self.update_text_preview()
+            self.update_remembered_selections()
             self.log(f"Selected certificate: {subject}\n")
             self.log(f"Thumbprint: {thumbprint}\n")
 
@@ -2390,14 +2555,14 @@ class PdfSignerGUI(tk.Tk):
 
     def get_signature_text(self):
         date_line, time_line = get_computer_timestamp_text()
-        signer_name = self.signer_name.get().strip() or "Gomez Rudyard Ramos"
+        signer_name = self.signer_name.get().strip()
 
-        return (
-            "Digitally signed by\n"
-            f"{signer_name}\n"
-            f"{date_line}\n"
-            f"{time_line}"
-        )
+        lines = ["Digitally signed by"]
+        if signer_name:
+            lines.append(signer_name)
+        lines.extend([date_line, time_line])
+
+        return "\n".join(lines)
 
     def update_timestamp_preview(self):
         date_line, time_line = get_computer_timestamp_text()
@@ -2462,6 +2627,20 @@ class PdfSignerGUI(tk.Tk):
             raise RuntimeError("Please select or enter the certificate thumbprint.")
 
         try:
+            dotnet_cert = find_certificate_by_thumbprint(
+                thumbprint=self.thumbprint.get().strip(),
+                store_location=self.store_location.get().strip() or "CurrentUser",
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Could not load selected certificate:\n{exc}")
+
+        cert_subject = str(dotnet_cert.Subject)
+        signer_name = get_signer_name_from_cert_subject(cert_subject)
+        self.selected_cert_subject.set(cert_subject)
+        self.signer_name.set(signer_name)
+        self.update_text_preview()
+
+        try:
             page = int(self.page_number.get().strip())
         except ValueError:
             raise RuntimeError("Page must be a number.")
@@ -2487,7 +2666,7 @@ class PdfSignerGUI(tk.Tk):
             "reason": None,
             "location": None,
             "field_prefix": self.field_prefix.get().strip() or "Signature",
-            "signer_name": self.signer_name.get().strip() or "Gomez Rudyard Ramos",
+            "signer_name": signer_name,
         }
 
     def start_signing(self):
@@ -2499,6 +2678,7 @@ class PdfSignerGUI(tk.Tk):
 
         self.update_timestamp_preview()
         settings["signature_text"] = self.get_signature_text()
+        self.update_remembered_selections()
 
         self.sign_button.config(state="disabled")
         self.log("Starting PDF signing...\n")

@@ -43,6 +43,10 @@ python ca-batch-sign.py
 7. Map the visible signature position on the sample PDF.
 8. Click `Sign PDFs`.
 
+Enable `Remember selected certificate, signature image and logo` if you want the GUI
+to reload the same signing certificate, sample certificate PDF, signature image, and
+logo the next time it opens.
+
 Signed files are saved as:
 
 ```text

@@ -276,10 +276,11 @@ def create_signature_appearance_image(
         canvas.alpha_composite(logo_img, (logo_x, logo_y))
 
         sig_img.thumbnail(
-            (int(width_px * 0.32), int(height_px * 0.72)),
+            (int(width_px * 0.40), int(height_px * 0.90)),
             Image.LANCZOS,
         )
-        sig_x = 8
+        signature_logo_gap = 10
+        sig_x = max(8, logo_x - sig_img.width - signature_logo_gap)
         sig_y = int((height_px - sig_img.height) / 2)
         canvas.alpha_composite(sig_img, (sig_x, sig_y))
 

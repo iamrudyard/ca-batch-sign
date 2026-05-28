@@ -1,0 +1,45 @@
+================================================================
+  PDF BATCH SIGNING — 2026-05-28 07:43:37 +08:00
+================================================================
+
+CERTIFICATE
+  Signer       : Gomez Rudyard Ramos
+  Organization : Department of the Interior and Local Government
+  Unit         : Regional Information and Communications Technology Unit
+  Country      : PH
+  Serial No.   : 2B5A0B26428B6D0C5082AD7C5A6A2B7263019CD2
+  Thumbprint   : 71:EE:B9:A5:D4:84:DC:10:93:C3:39:FF:AB:23:BD:C3:63:66:87:C3
+  Valid until  : 2027-09-09
+
+
+INPUT / OUTPUT
+  Source folder: C:\Users\dilgx\OneDrive\Pictures\input
+  Output folder: C:\Users\dilgx\OneDrive\Pictures\output
+  Files queued : 4
+
+----------------------------------------------------------------
+  PROCESSING
+----------------------------------------------------------------
+  #   Time      File                              Pages  Status   Duration
+  ---  --------  --------------------------------  -----  -------  --------
+  1/4   07:43:37  Billones_Vaughn_Yahweh_Jesh_L_CA      1  ✓ OK        0.24s
+  2/4   07:43:37  Gomez_Rudyard_R_CA.pdf                1  ✓ OK        0.03s
+  3/4   07:43:37  Lacsento_Jozua_Jireh_B_CA.pdf         1  ✓ OK        0.03s
+  4/4   07:43:37  Navarro_Mae_Angela_T_CA.pdf           1  ✓ OK        0.03s
+
+----------------------------------------------------------------
+  SUMMARY
+----------------------------------------------------------------
+  Total files  : 4
+  Succeeded    : 4  (100.0%)
+  Failed       : 0  (0.0%)
+  Total pages  : 4
+  Elapsed time : 0.54s
+  Avg per file : 0.14s
+
+  Output written to: C:\Users\dilgx\OneDrive\Pictures\output
+  Log saved to     : D:\Project\ca-batch-sign\logs\signing_20260528_074337.log
+
+================================================================
+  Finished at 2026-05-28 07:43:37 +08:00
+================================================================
