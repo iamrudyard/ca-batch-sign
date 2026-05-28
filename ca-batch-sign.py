@@ -795,6 +795,7 @@ class PrintLayoutDialog(tk.Toplevel):
         self.preview_total_pages = 0
         self.preview_photo = None         # keep a reference so it isn't GC'd
         self.last_generated_pdf = None    # Path of the most recent generated layout
+        self.generated_temp_pdfs = set()  # Temp layouts created by this dialog
 
         self._build_ui()
         self._populate_printers()
@@ -1164,6 +1165,42 @@ class PrintLayoutDialog(tk.Toplevel):
             if var.get()
         ]
 
+    def _new_layout_pdf_path(self):
+        fd, name = tempfile.mkstemp(
+            prefix="dilg_certificate_print_layout_",
+            suffix=".pdf",
+        )
+        os.close(fd)
+        path = Path(name)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        self.generated_temp_pdfs.add(path)
+        return path
+
+    def _close_preview_doc(self):
+        if self.preview_doc is not None:
+            try:
+                self.preview_doc.close()
+            except Exception:
+                pass
+            self.preview_doc = None
+
+    def _cleanup_generated_temp_pdfs(self):
+        for path in list(self.generated_temp_pdfs):
+            try:
+                Path(path).unlink()
+            except FileNotFoundError:
+                pass
+            except PermissionError:
+                # The PDF may still be open in a viewer or print handler.
+                continue
+            except Exception:
+                continue
+            else:
+                self.generated_temp_pdfs.discard(path)
+
     # -------------------------------------------------------------------------
     #  Printer enumeration
     # -------------------------------------------------------------------------
@@ -1224,8 +1261,7 @@ class PrintLayoutDialog(tk.Toplevel):
 
             top, bottom, left, right = self._parse_margins()
 
-            tmp_dir = Path(tempfile.gettempdir())
-            out_pdf = tmp_dir / "dilg_certificate_print_layout.pdf"
+            out_pdf = self._new_layout_pdf_path()
 
             build_a4_2up_pdf(
                 input_pdf_paths=selected,
@@ -1247,12 +1283,7 @@ class PrintLayoutDialog(tk.Toplevel):
                     f"Original error: {e}"
                 )
 
-            if self.preview_doc is not None:
-                try:
-                    self.preview_doc.close()
-                except Exception:
-                    pass
-                self.preview_doc = None
+            self._close_preview_doc()
 
             self.preview_doc = fitz.open(str(out_pdf))
             self.preview_total_pages = self.preview_doc.page_count
@@ -1393,8 +1424,7 @@ class PrintLayoutDialog(tk.Toplevel):
             # changes since the last preview are reflected.
             top, bottom, left, right = self._parse_margins()
 
-            tmp_dir = Path(tempfile.gettempdir())
-            out_pdf = tmp_dir / "dilg_certificate_print_layout.pdf"
+            out_pdf = self._new_layout_pdf_path()
 
             build_a4_2up_pdf(
                 input_pdf_paths=selected,
@@ -1426,12 +1456,8 @@ class PrintLayoutDialog(tk.Toplevel):
     #  Lifecycle
     # -------------------------------------------------------------------------
     def _on_close(self):
-        if self.preview_doc is not None:
-            try:
-                self.preview_doc.close()
-            except Exception:
-                pass
-            self.preview_doc = None
+        self._close_preview_doc()
+        self._cleanup_generated_temp_pdfs()
         self.destroy()
 
 
